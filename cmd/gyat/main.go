@@ -8,7 +8,7 @@ import (
 func main() {
 
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: gyat <commands> [<args>...]\n")
+		fmt.Fprintf(os.Stderr, "Usage: gyat <commands> [<args>...]\n")
 		os.Exit(1)
 	}
 
