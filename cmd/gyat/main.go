@@ -22,6 +22,9 @@ func main() {
 	case "hash-object":
 		hashObject()
 
+	case "ls-tree":
+		lsTree()
+
 	default:
 		fmt.Println("Initialized gyat directory")
 		os.Exit(1)
