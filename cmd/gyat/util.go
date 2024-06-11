@@ -1,10 +1,13 @@
 package main
 
 import (
+	"compress/zlib"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // * retrieve the full file path to the obejct file using the partial hash (atleast 6 characters) given
@@ -20,6 +23,7 @@ func getObjectFile(partialHash string) (string, error) {
 		return "", err
 	}
 
+	// * check if only one file match the hash pattern
 	for _, e := range entries {
 		partialEntryName := e.Name()[0:partialObjectNameLength]
 
@@ -62,4 +66,54 @@ func getEntryType(n string) string {
 	default:
 		return "blob"
 	}
+}
+
+// retrieve blob file name
+func catSingleFile(hash string) string {
+	hashLength := len(hash)
+	var blobPath string
+	var err error
+
+	if hashLength < 6 {
+		fmt.Fprintf(os.Stderr, "Usage: provide a hash length of atleast 6 characters")
+		os.Exit(1)
+	}
+
+	if hashLength < 40 {
+		blobPath, err = getObjectFile(hash)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding blob file: %s\n", err)
+			os.Exit(1)
+		}
+
+	} else {
+		blobPath = fmt.Sprintf(".gyat/objects/%v/%v", hash[0:2], hash[2:])
+	}
+
+	file, err := os.Open(blobPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening file: %s\n", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	// instantiate file reader
+	r, err := zlib.NewReader(io.Reader(file))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decompressing blob file: %s\n", err)
+		os.Exit(1)
+	}
+	defer r.Close()
+
+	// read all bytes from reader
+	blobBytes, err := io.ReadAll(r)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	// seperate the header and the content
+	blob := strings.Split(string(blobBytes), "\x00")
+
+	return blob[1]
 }

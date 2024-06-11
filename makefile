@@ -16,10 +16,12 @@ TEST_FILE=test.txt
 
 # add more setups
 setup:
-	./gyat init \
-	&& touch $(TEST_FILE) \
+	touch $(TEST_FILE) \
 	&& echo "Hello, Gyat" > $(TEST_FILE) \
 	&& ./gyat hash-object -w $(TEST_FILE)
 
 clean:
 	rm -rf $(GO_BIN_LOCATION) .gyat *.txt
+
+clean-exe:
+	rm -rf $(GO_BIN_LOCATION)

@@ -31,12 +31,8 @@ func gyatInit() {
 
 }
 
-func catFile() {
-	arg := os.Args[2]
-	if arg != "-p" {
-		fmt.Fprintf(os.Stderr, "Fatal: missng -p argument")
-		os.Exit(1)
-	}
+func catFile() []string {
+	hashs := []string{}
 
 	isGit := isGyatFolderExist()
 	if isGit {
@@ -44,62 +40,28 @@ func catFile() {
 		os.Exit(1)
 	}
 
-	// retrieve blob file name
-	hash := os.Args[3]
-	hashLength := len(hash)
-	var blobPath string
-	var err error
-
-	if hashLength < 6 {
-		fmt.Fprintf(os.Stderr, "Usage: provide a hash length of atleast 6 characters")
-		os.Exit(1)
-	}
-
-	if hashLength < 40 {
-		blobPath, err = getObjectFile(hash)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error finding blob file: %s\n", err)
-			os.Exit(1)
+	for i, arg := range os.Args {
+		if arg == "-p" {
+			hashs = append(hashs, os.Args[i+1])
 		}
-
-	} else {
-		blobPath = fmt.Sprintf(".gyat/objects/%v/%v", hash[0:2], hash[2:])
 	}
 
-	file, err := os.Open(blobPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening file: %s\n", err)
-		os.Exit(1)
-	}
-	defer file.Close()
-
-	// instantiate file reader
-	r, err := zlib.NewReader(io.Reader(file))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error decompressing blob file: %s\n", err)
-		os.Exit(1)
-	}
-	defer r.Close()
-
-	// read all bytes from reader
-	blobBytes, err := io.ReadAll(r)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+	if len(hashs) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: insufficient arguments")
 		os.Exit(1)
 	}
 
-	// seperate the header and the content
-	blob := strings.Split(string(blobBytes), "\x00")
-
-	// print the content and close the reader
-	fmt.Print(blob[1])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error closing file: %s\n", err)
-		os.Exit(1)
+	var contents []string
+	for _, hash := range hashs {
+		content := catSingleFile(hash)
+		fmt.Println(content)
+		contents = append(contents, content)
 	}
+
+	return contents
 }
 
-func hashObject() {
+func hashObject() string {
 	arg := os.Args[2]
 	if arg != "-w" {
 		fmt.Fprintf(os.Stderr, "Fatal: missng -w argument")
@@ -158,9 +120,10 @@ func hashObject() {
 	}
 
 	fmt.Println(shaHashHex)
+	return shaHashHex
 }
 
-func lsTree() {
+func lsTree() []string {
 	// arg := os.Args[2]
 	// if arg != "--name-only" {
 	// 	fmt.Fprintf(os.Stderr, "Fatal: missng --name-only argument")
@@ -172,7 +135,7 @@ func lsTree() {
 	isGit := isGyatFolderExist()
 	if isGit {
 		fmt.Fprintf(os.Stderr, "Fatal: .git folder not found in working directory")
-		return
+		os.Exit(1)
 	}
 
 	treeFilePath, err := getObjectFile(treeHash)
@@ -207,6 +170,7 @@ func lsTree() {
 
 	var hIdx int
 	for i, v := range treeFileBytes {
+		fmt.Println(string(v), i)
 		if string(v) == "\x00" {
 			hIdx = i + 1
 			break
@@ -224,9 +188,11 @@ func lsTree() {
 			if char == "0" || char == "2" {
 				initial = 1
 			}
-
 			treefileLines = append(treefileLines,
-				fmt.Sprintf("%d%s %x\n", initial, treeFileByteContent[start:i], treeFileByteContent[i+1:i+21]))
+				strings.TrimSuffix(
+					fmt.Sprintf("%d%s %x\n", initial, treeFileByteContent[start:i], treeFileByteContent[i+1:i+21]), "\n",
+				),
+			)
 			i += 22
 			start = i
 			continue
@@ -234,9 +200,14 @@ func lsTree() {
 		i++
 	}
 
-	var sepLine []string
+	returnLines := []string{}
+
 	for _, line := range treefileLines {
-		sepLine = strings.Split(line, " ")
-		fmt.Printf("%s %s %s %s\n", sepLine[0], getEntryType(sepLine[0]), strings.TrimSuffix(sepLine[2], "\n"), sepLine[1])
+		sepLine := strings.Split(line, " ")
+		returnLines = append(returnLines,
+			fmt.Sprintf("%s %s %s %s\n", sepLine[0], getEntryType(sepLine[0]), sepLine[2], sepLine[1]),
+		)
 	}
+
+	return returnLines
 }
