@@ -7,8 +7,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+type Object struct {
+	mode    int
+	objType string
+	shaHash string
+	name    string
+}
 
 // * retrieve the full file path to the obejct file using the partial hash (atleast 6 characters) given
 func getObjectFile(partialHash string) (string, error) {
@@ -116,4 +124,73 @@ func catSingleFile(hash string) string {
 	blob := strings.Split(string(blobBytes), "\x00")
 
 	return blob[1]
+}
+
+func lsTreeEntrys(treePath string) []Object {
+	treeFile, err := os.Open(treePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening file: %s\n", err)
+		os.Exit(1)
+	}
+	defer treeFile.Close()
+
+	r, err := zlib.NewReader(treeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decompressing file: %s\n", err)
+		os.Exit(1)
+	}
+
+	treeFileBytes, err := io.ReadAll(r)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	if string(treeFileBytes[:4]) != "tree" {
+		fmt.Fprintf(os.Stderr, "Fatal: not a tree file")
+		os.Exit(1)
+	}
+
+	var hIdx int
+	for i, v := range treeFileBytes {
+		if string(v) == "\x00" {
+			hIdx = i + 1
+			break
+		}
+	}
+
+	treeFileByteContent := treeFileBytes[hIdx:]
+	treefileLines := []string{}
+
+	start := 0
+	for i := 0; i < len(treeFileByteContent); {
+		if string(treeFileByteContent[i]) == "\x00" {
+			initial := 0
+			char := string(treeFileByteContent[start])
+			if char == "0" || char == "2" {
+				initial = 1
+			}
+			treefileLines = append(treefileLines,
+				strings.TrimSuffix(
+					fmt.Sprintf("%d%s %x\n", initial, treeFileByteContent[start:i], treeFileByteContent[i+1:i+21]), "\n",
+				),
+			)
+			i += 22
+			start = i
+			continue
+		}
+		i++
+	}
+
+	objs := []Object{}
+
+	for _, line := range treefileLines {
+		sepLine := strings.Split(line, " ")
+		mode, _ := strconv.Atoi(sepLine[0])
+		objs = append(objs,
+			Object{mode, getEntryType(sepLine[0]), sepLine[2], sepLine[1]},
+		)
+	}
+
+	return objs
 }

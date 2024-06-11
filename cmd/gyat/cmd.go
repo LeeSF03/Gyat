@@ -5,10 +5,8 @@ import (
 	"compress/zlib"
 	"crypto/sha1"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func gyatInit() {
@@ -31,14 +29,15 @@ func gyatInit() {
 
 }
 
-func catFile() []string {
-	hashs := []string{}
-
+func catFile() {
 	isGit := isGyatFolderExist()
 	if isGit {
 		fmt.Fprintf(os.Stderr, "Fatal: .git folder not found in working directory")
 		os.Exit(1)
 	}
+
+	// use map for more arguments options
+	hashs := []string{}
 
 	for i, arg := range os.Args {
 		if arg == "-p" {
@@ -51,14 +50,10 @@ func catFile() []string {
 		os.Exit(1)
 	}
 
-	var contents []string
 	for _, hash := range hashs {
 		content := catSingleFile(hash)
 		fmt.Println(content)
-		contents = append(contents, content)
 	}
-
-	return contents
 }
 
 func hashObject() string {
@@ -123,14 +118,20 @@ func hashObject() string {
 	return shaHashHex
 }
 
-func lsTree() []string {
-	// arg := os.Args[2]
-	// if arg != "--name-only" {
-	// 	fmt.Fprintf(os.Stderr, "Fatal: missng --name-only argument")
-	// 	return
-	// }
+func lsTree() {
+	options := make(map[string]string)
+	var idx int
+	for i := 2; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if string(arg[0]) == "-" {
+			options[arg] = ""
+			continue
+		}
+		idx = i
+		break
+	}
 
-	treeHash := os.Args[2]
+	treeHash := os.Args[idx]
 
 	isGit := isGyatFolderExist()
 	if isGit {
@@ -143,71 +144,48 @@ func lsTree() []string {
 		fmt.Fprintf(os.Stderr, "Error getting file: %s\n", err)
 		os.Exit(1)
 	}
+	objects := lsTreeEntrys(treeFilePath)
 
-	treeFile, err := os.Open(treeFilePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening file: %s\n", err)
-		os.Exit(1)
-	}
-	defer treeFile.Close()
-
-	r, err := zlib.NewReader(treeFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error decompressing file: %s\n", err)
-		os.Exit(1)
-	}
-
-	treeFileBytes, err := io.ReadAll(r)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
-		os.Exit(1)
-	}
-
-	if string(treeFileBytes[:4]) != "tree" {
-		fmt.Fprintf(os.Stderr, "Fatal: not a tree file")
-		os.Exit(1)
-	}
-
-	var hIdx int
-	for i, v := range treeFileBytes {
-		fmt.Println(string(v), i)
-		if string(v) == "\x00" {
-			hIdx = i + 1
-			break
-		}
-	}
-
-	treeFileByteContent := treeFileBytes[hIdx:]
-	treefileLines := []string{}
-
-	start := 0
-	for i := 0; i < len(treeFileByteContent); {
-		if string(treeFileByteContent[i]) == "\x00" {
-			initial := 0
-			char := string(treeFileByteContent[start])
-			if char == "0" || char == "2" {
-				initial = 1
+	_, ok := options["-d"]
+	if ok {
+		n := 0
+		for _, obj := range objects {
+			if obj.objType == "tree" {
+				objects[n] = obj
+				n++
+				continue
 			}
-			treefileLines = append(treefileLines,
-				strings.TrimSuffix(
-					fmt.Sprintf("%d%s %x\n", initial, treeFileByteContent[start:i], treeFileByteContent[i+1:i+21]), "\n",
-				),
-			)
-			i += 22
-			start = i
-			continue
 		}
-		i++
+
+		objects = objects[:n]
 	}
 
-	returnLines := []string{}
-
-	for _, line := range treefileLines {
-		sepLine := strings.Split(line, " ")
-		returnLines = append(returnLines,
-			fmt.Sprintf("%s %s %s %s\n", sepLine[0], getEntryType(sepLine[0]), sepLine[2], sepLine[1]),
-		)
+	_, ok = options["--name-only"]
+	if ok {
+		for _, obj := range objects {
+			fmt.Println(obj.name)
+		}
+		os.Exit(0)
 	}
 
-	return returnLines
+	_, ok = options["--name-status"]
+	if ok {
+		for _, obj := range objects {
+			fmt.Println(obj.name)
+		}
+		os.Exit(0)
+	}
+
+	_, ok = options["--object-only"]
+	if ok {
+		for _, obj := range objects {
+			fmt.Println(obj.objType)
+		}
+		os.Exit(0)
+	}
+
+	for _, obj := range objects {
+		fmt.Printf("%d %s %s %s\n", obj.mode, obj.objType, obj.shaHash, obj.name)
+	}
+	os.Exit(0)
 }
