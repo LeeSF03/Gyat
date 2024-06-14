@@ -17,13 +17,16 @@ func main() {
 		gyatInit()
 
 	case "cat-file":
-		catFile()
+		catFile(os.Args[2:]...)
 
 	case "hash-object":
-		hashObject()
+		hashObject(os.Args[2:]...)
 
 	case "ls-tree":
-		lsTree()
+		lsTree(os.Args[2:]...)
+
+	case "add":
+		stageFiles(os.Args[2:]...)
 
 	default:
 		fmt.Println("Initialized gyat directory")

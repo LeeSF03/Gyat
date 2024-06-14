@@ -2,11 +2,8 @@ package main
 
 import (
 	"bytes"
-	"compress/zlib"
-	"crypto/sha1"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 func gyatInit() {
@@ -29,19 +26,26 @@ func gyatInit() {
 
 }
 
-func catFile() {
+func catFile(args ...string) {
 	isGit := isGyatFolderExist()
 	if isGit {
-		fmt.Fprintf(os.Stderr, "Fatal: .git folder not found in working directory")
+		fmt.Fprintf(os.Stderr, "Fatal: .gyat folder not found in working directory")
 		os.Exit(1)
 	}
 
-	// use map for more arguments options
 	hashs := []string{}
+	options := make(map[string]string)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-p" || arg == "-e" {
+			options[arg] = ""
+			hashs = append(hashs, args[i+1])
+			continue
+		}
 
-	for i, arg := range os.Args {
-		if arg == "-p" {
-			hashs = append(hashs, os.Args[i+1])
+		if string(arg[0]) == "-" {
+			options[arg] = ""
+			continue
 		}
 	}
 
@@ -51,13 +55,13 @@ func catFile() {
 	}
 
 	for _, hash := range hashs {
-		content := catSingleFile(hash)
-		fmt.Println(content)
+		content := getBlobContent(hash)
+		fmt.Print(content)
 	}
 }
 
-func hashObject() string {
-	arg := os.Args[2]
+func hashObject(args ...string) {
+	arg := args[2]
 	if arg != "-w" {
 		fmt.Fprintf(os.Stderr, "Fatal: missng -w argument")
 		os.Exit(1)
@@ -65,12 +69,24 @@ func hashObject() string {
 
 	isGit := isGyatFolderExist()
 	if isGit {
-		fmt.Fprintf(os.Stderr, "Fatal: .git folder not found in working directory")
+		fmt.Fprintf(os.Stderr, "Fatal: .gyat folder not found in working directory")
 		os.Exit(1)
 	}
 
+	options := make(map[string]string)
+	var idx int
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if string(arg[0]) == "-" {
+			options[arg] = ""
+			continue
+		}
+		idx = i
+		break
+	}
+
 	// retrieve file path
-	filePath := os.Args[3]
+	filePath := args[idx]
 
 	// retrieve content from file
 	content, err := os.ReadFile(filePath)
@@ -81,48 +97,22 @@ func hashObject() string {
 
 	// convert content into blob format
 	blob := fmt.Sprintf("blob %d\x00%s", len(content), content)
-	shaHash := sha1.Sum([]byte(blob))
-	shaHashHex := fmt.Sprintf("%x", shaHash)
-	blobName := shaHashHex[2:]
-	blobDir := filepath.Join(".gyat", "objects", shaHashHex[:2])
+	hash := getHashFromBlob(blob)
 
-	// write compress blob into buffer
-	var buffer bytes.Buffer
-	w := zlib.NewWriter(&buffer)
-	_, err = w.Write([]byte(blob))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error compressing blob: %s\n", err)
-		os.Exit(1)
-	}
-	err = w.Close()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error closing buffer writer: %s\n", err)
-		os.Exit(1)
+	_, ok := options["-w"]
+	if ok {
+		writeBlobToFile(hash, blob)
+		os.Exit(0)
 	}
 
-	// create blob directory
-	err = os.Mkdir(blobDir, 0755)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating directory: %s\n", err)
-		os.Exit(1)
-	}
-
-	// write compressed blob to blob file
-	err = os.WriteFile(filepath.Join(blobDir, blobName), buffer.Bytes(), 0755)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing to file: %s\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println(shaHashHex)
-	return shaHashHex
+	fmt.Println(hash)
 }
 
-func lsTree() {
+func lsTree(args ...string) {
 	options := make(map[string]string)
 	var idx int
-	for i := 2; i < len(os.Args); i++ {
-		arg := os.Args[i]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if string(arg[0]) == "-" {
 			options[arg] = ""
 			continue
@@ -131,11 +121,11 @@ func lsTree() {
 		break
 	}
 
-	treeHash := os.Args[idx]
+	treeHash := args[idx]
 
 	isGit := isGyatFolderExist()
 	if isGit {
-		fmt.Fprintf(os.Stderr, "Fatal: .git folder not found in working directory")
+		fmt.Fprintf(os.Stderr, "Fatal: .gyat folder not found in working directory")
 		os.Exit(1)
 	}
 
@@ -188,4 +178,10 @@ func lsTree() {
 		fmt.Printf("%d %s %s %s\n", obj.mode, obj.objType, obj.shaHash, obj.name)
 	}
 	os.Exit(0)
+}
+
+func stageFiles(args ...string) {
+	file := args[0]
+	var buf bytes.Buffer
+	writeIndexContent(file, buf)
 }
