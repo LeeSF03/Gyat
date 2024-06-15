@@ -1,8 +1,9 @@
 package main
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -61,12 +62,6 @@ func catFile(args ...string) {
 }
 
 func hashObject(args ...string) {
-	arg := args[2]
-	if arg != "-w" {
-		fmt.Fprintf(os.Stderr, "Fatal: missng -w argument")
-		os.Exit(1)
-	}
-
 	isGit := isGyatFolderExist()
 	if isGit {
 		fmt.Fprintf(os.Stderr, "Fatal: .gyat folder not found in working directory")
@@ -181,7 +176,34 @@ func lsTree(args ...string) {
 }
 
 func stageFiles(args ...string) {
-	file := args[0]
-	var buf bytes.Buffer
-	writeIndexContent(file, buf)
+	if isGyatFolderExist() {
+		fmt.Fprintf(os.Stderr, "Fatal: .gyat folder not found in working directory")
+		os.Exit(1)
+	}
+
+	p := args[0]
+	f, err := os.OpenFile(".gyat/index", os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Fatal: problem opening index file")
+		os.Exit(1)
+	}
+	defer f.Close()
+	var n uint32 = 0
+	n = 0
+
+	b := []byte("DIRC00010000")
+	f.Write(b)
+
+	writeIndexContent(p, f, &n)
+
+	nb := make([]byte, 4)
+	binary.BigEndian.PutUint32(nb, n)
+
+	if _, err := f.Seek(8, io.SeekStart); err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+	}
+
+	if _, err := f.Write(nb); err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-type Object struct {
+type GyatObject struct {
 	mode    int
 	objType string
 	shaHash string
@@ -135,9 +136,9 @@ func getHashFromBlob(blob string) string {
 	return shaHashHex
 }
 
-func writeBlobToFile(shaHashHex string, blob string) {
-	blobName := shaHashHex[2:]
-	blobDir := filepath.Join(".gyat", "objects", shaHashHex[:2])
+func writeBlobToFile(hash string, blob string) {
+	blobName := hash[2:]
+	blobDir := filepath.Join(".gyat", "objects", hash[:2])
 
 	// write compress blob into buffer
 	var buffer bytes.Buffer
@@ -168,7 +169,7 @@ func writeBlobToFile(shaHashHex string, blob string) {
 	}
 }
 
-func lsTreeEntrys(treePath string) []Object {
+func lsTreeEntrys(treePath string) []GyatObject {
 	treeFile, err := os.Open(treePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening file: %s\n", err)
@@ -224,87 +225,157 @@ func lsTreeEntrys(treePath string) []Object {
 		i++
 	}
 
-	objs := []Object{}
+	objs := []GyatObject{}
 
 	for _, line := range treefileLines {
 		sepLine := strings.Split(line, " ")
 		mode, _ := strconv.Atoi(sepLine[0])
 		objs = append(objs,
-			Object{mode, getEntryType(sepLine[0]), sepLine[2], sepLine[1]},
+			GyatObject{mode, getEntryType(sepLine[0]), sepLine[2], sepLine[1]},
 		)
 	}
 
 	return objs
 }
 
-func writeIndexContent(filePath string, content bytes.Buffer) {
-	dirEntrys, err := os.ReadDir(filePath)
+// each index entry format: 22 byte, \x00, filepath, 20 byte, \n
+func writeIndexContent(entryPath string, f *os.File, n *uint32) {
+	dirEntrys, err := os.ReadDir(entryPath)
 	if err != nil {
 		fmt.Printf("Error reading directory: %s\n", err)
 	}
 
 	for _, dirEntry := range dirEntrys {
-		entryName := filePath + "/" + dirEntry.Name()
+		fullEntryName := entryPath + "/" + dirEntry.Name()
 
-		if entryName == filePath+"/"+".gyat" || entryName == filePath+"/"+".git" {
+		if fullEntryName == entryPath+"/"+".gyat" || fullEntryName == entryPath+"/"+".git" {
 			continue
 		}
 
 		if dirEntry.IsDir() {
-			writeIndexContent(entryName, content)
+			writeIndexContent(fullEntryName, f, n)
 			continue
 		}
 
-		stat, err := os.Stat(entryName)
+		fi, err := os.Stat(fullEntryName)
 		if err != nil {
 			fmt.Printf("Error in finding file %s\n", err)
 			os.Exit(1)
 		}
 
-		d := stat.Sys().(*syscall.Win32FileAttributeData)
+		s := uint32(fi.Size())
 
-		// 32 bit create time, seconds v
-		// 32 bit create time, nano secs v
-		cns := d.CreationTime.Nanoseconds()
-		ctime_s := cns / 1000_000_000
-		ctime_n := cns
-
-		// 32 bit modfied time, seconds v
-		// 32 bit modified time, nano secs v
-		mns := d.LastWriteTime.Nanoseconds()
-		mtime_s := mns / 1000_000_000
-		mtime_n := mns
-
-		fmt.Println(entryName, ctime_s, ctime_n, mtime_s, mtime_n)
-
-		// 4 bit object type
-		// 3 bit unused
-		// 9 bit file permission based on type of blob
-		// 4 byte uid
-		// 4 byte gid
-		// 4 byte file size
-		// filepath
-		// 20 byte hash
-		content, err := os.ReadFile(entryName)
+		content, err := os.ReadFile(fullEntryName)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading from file: %s\n", err)
 			os.Exit(1)
 		}
-		blob := fmt.Sprintf("blob %d\x00%s", len(content), content)
-		hash := getHashFromBlob(blob)
-		fmt.Println(hash)
-		// c := make([]int8, 20)
-		// b := []byte(hash)
-		// for i := 0; i < len(hash); i += 2 {
-		// 	var char int8
-		// 	if i % 2 == 0 && string(hash[i]) <= "9" && string(hash[i]) >= "1" {
 
-		// 	}
-		// 	char := (int8(hash[i]) << 4) & int8(hash[i+1])
-		// 	c = append(c, char)
-		// 	fmt.Printf("%b %b %s %s | %b\n", hash[i], hash[i+1], string(hash[i]), string(hash[i+1]), char)
-		// }
-		// fmt.Println(c)
-		// fmt.Println(b)
+		blob := fmt.Sprintf("blob %d\x00%s", s, content)
+		hash := getHashFromBlob(blob)
+		// fmt.Println(hash)
+
+		// skip file if already exists
+		if isObjFileExist(hash) {
+			continue
+		}
+
+		d := fi.Sys().(*syscall.Win32FileAttributeData)
+
+		buf32 := make([]byte, 4)
+		buf16 := make([]byte, 2)
+
+		// 32 bit - 4 byte create time, seconds v
+		// 32 bit - 4 byte create time fractions, nano secs v
+		ctime_n := d.CreationTime.Nanoseconds()
+		binary.BigEndian.PutUint32(buf32, uint32(ctime_n))
+		f.Write(buf32)
+
+		ctime_s := uint32(ctime_n % 1000_000_000)
+		binary.BigEndian.PutUint32(buf32, uint32(ctime_s))
+		f.Write(buf32)
+
+		// fmt.Println(buf32)
+
+		// 32 bit - 4 byte modfied time, seconds v
+		// 32 bit - 4 byte modified time fractions, nano secs v
+		mtime_n := d.LastWriteTime.Nanoseconds()
+		binary.BigEndian.PutUint32(buf32, uint32(mtime_n))
+		f.Write(buf32)
+
+		mtime_s := uint32(mtime_n % 1000_000_000)
+		binary.BigEndian.PutUint32(buf32, uint32(mtime_s))
+		f.Write(buf32)
+
+		// fmt.Println(buf32)
+
+		// fmt.Println(fullEntryName, ctime_s, ctime_n, mtime_s, mtime_n)
+
+		// 4 bit object type
+		// 3 bit unused
+		// 9 bit file permission based on type of blob
+		// total: 2 byte
+		var otp uint16
+		p := fi.Mode()
+		if p&os.ModeSymlink > 0 {
+			otp = (uint16(10) << 12) | uint16(p)
+		} else {
+			otp = (uint16(8) << 12) | uint16(p)
+		}
+		binary.BigEndian.AppendUint16(buf16, otp)
+		f.Write(buf16)
+		// fmt.Printf("perm: %b\n", otp)
+
+		// uid and gid is only I linux, I have no idea what windows uses
+		// 4 byte uid
+		// 4 byte gid
+
+		// 4 byte file size
+		// s
+		binary.BigEndian.AppendUint32(buf32, s)
+		f.Write(buf32)
+
+		// filepath
+		// entryName
+		f.WriteString(fullEntryName + "\x00")
+
+		// 20 byte hash
+		shortenHash := []uint8{}
+		for i := 0; i < len(hash); i += 2 {
+			c1, err := aToHex(hash[i])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			}
+			c2, err := aToHex(hash[i+1])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			}
+			char := (c1 << 4) | c2
+			shortenHash = append(shortenHash, char)
+			// fmt.Printf("%b %b %s %s | %b %b %b %d\n", hash[i], hash[i+1], string(hash[i]), string(hash[i+1]), c1, c2, char, char)
+		}
+		// fmt.Println(shortenHash)
+		f.Write(shortenHash)
+		f.WriteString("\n")
+		(*n)++
 	}
+}
+
+func aToHex(a byte) (uint8, error) {
+	if a >= 48 && a <= 57 {
+		return uint8(a - 48), nil
+	}
+
+	if a >= 97 && a <= 102 {
+		return uint8(a - 87), nil
+	}
+	return 0, errors.New("can't be converted to hex")
+}
+
+func isObjFileExist(hash string) bool {
+	objFile := filepath.Join(".gyat", "objects", hash[:2], hash[2:])
+	if _, err := os.Stat(objFile); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
 }
