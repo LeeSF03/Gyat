@@ -194,7 +194,7 @@ func stageFiles(args ...string) {
 	b := []byte("DIRC00010000")
 	f.Write(b)
 
-	writeIndexContent(p, f, &n)
+	writeIndexEntry(p, f, &n)
 
 	nb := make([]byte, 4)
 	binary.BigEndian.PutUint32(nb, n)
@@ -206,4 +206,15 @@ func stageFiles(args ...string) {
 	if _, err := f.Write(nb); err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
 	}
+}
+
+func writeTree() {
+	f, _ := os.Open(".gyat/index")
+	if _, err := f.Seek(12, io.SeekStart); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	defer f.Close()
+	readIndexEntry(f)
 }

@@ -28,6 +28,9 @@ func main() {
 	case "add":
 		stageFiles(os.Args[2:]...)
 
+	case "write-tree":
+		writeTree()
+
 	default:
 		fmt.Println("Initialized gyat directory")
 		os.Exit(1)

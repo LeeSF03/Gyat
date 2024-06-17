@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
@@ -131,9 +132,9 @@ func getBlobContent(hash string) string {
 }
 
 func getHashFromBlob(blob string) string {
-	shaHash := sha1.Sum([]byte(blob))
-	shaHashHex := fmt.Sprintf("%x", shaHash)
-	return shaHashHex
+	shaHashHex := sha1.Sum([]byte(blob))
+	shaHash := fmt.Sprintf("%x", shaHashHex)
+	return shaHash
 }
 
 func writeBlobToFile(hash string, blob string) {
@@ -239,7 +240,7 @@ func lsTreeEntrys(treePath string) []GyatObject {
 }
 
 // each index entry format: 22 byte, \x00, filepath, 20 byte, \n
-func writeIndexContent(entryPath string, f *os.File, n *uint32) {
+func writeIndexEntry(entryPath string, f *os.File, n *uint32) {
 	dirEntrys, err := os.ReadDir(entryPath)
 	if err != nil {
 		fmt.Printf("Error reading directory: %s\n", err)
@@ -253,7 +254,7 @@ func writeIndexContent(entryPath string, f *os.File, n *uint32) {
 		}
 
 		if dirEntry.IsDir() {
-			writeIndexContent(fullEntryName, f, n)
+			writeIndexEntry(fullEntryName, f, n)
 			continue
 		}
 
@@ -354,11 +355,40 @@ func writeIndexContent(entryPath string, f *os.File, n *uint32) {
 			shortenHash = append(shortenHash, char)
 			// fmt.Printf("%b %b %s %s | %b %b %b %d\n", hash[i], hash[i+1], string(hash[i]), string(hash[i+1]), c1, c2, char, char)
 		}
-		// fmt.Println(shortenHash)
+		fmt.Println(fullEntryName, shortenHash)
 		f.Write(shortenHash)
 		f.WriteString("\n")
 		(*n)++
 	}
+}
+
+func readIndexEntry(f *os.File) (string, []byte) {
+	// info bytes
+	ib := make([]byte, 22)
+	if n, err := f.Read(ib); err != nil || n < 22 {
+		fmt.Fprintf(os.Stderr, "Invalid index entry: %s\n", err)
+		os.Exit(1)
+	}
+
+	reader := bufio.NewReader(f)
+	var fp []byte
+	for {
+		b, err := reader.ReadByte()
+		if b != byte('\x00') && err == nil {
+			fp = append(fp, b)
+			continue
+		}
+		break
+	}
+
+	var hb []byte
+	for i := 0; i < 20; i++ {
+		b, _ := reader.ReadByte()
+		hb = append(hb, b)
+	}
+	reader.ReadByte()
+
+	return string(fp), hb
 }
 
 func aToHex(a byte) (uint8, error) {
